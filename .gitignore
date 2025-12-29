@@ -3,3 +3,5 @@
 build/
 .cache/
 .vscode/
+*.egg-info/
+uv.lock

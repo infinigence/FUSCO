@@ -1,27 +1,25 @@
 import torch
 import torch.distributed as dist
-from torch.distributed import ProcessGroup, ReduceOp
-from typing import Dict, Optional, List
 
-from shared_lib import (
+from .shared_lib import (
     SharedLib,
     buffer_type,
     cudaStream_t,
     ncclComm_t,
     ncclDataTypeEnum,
-    ncclRedOpTypeEnum,
     ncclUniqueId,
 )
+
 
 class FUSCO:
     def __init__(
         self,
-        group_ranks: List[List[int]],
+        group_ranks: list[list[int]],
         library_path: str,
     ):
         assert dist.is_initialized()
         global_rank = dist.get_rank()
-        device = torch.device('cuda', torch.cuda.current_device())
+        device = torch.device("cuda", torch.cuda.current_device())
 
         for ranks in group_ranks:
             cpu_group = torch.distributed.new_group(ranks, backend="gloo")
@@ -72,8 +70,12 @@ class FUSCO:
         assert input.dim() == 2, "input must be a 2D tensor"
         assert recv_splits.dim() == 1, "recv_splits must be a 1D tensor"
         assert send_splits.dim() == 1, "send_splits must be a 1D tensor"
-        assert recv_splits.numel() == self.local_size, "recv_splits must have the same number of elements as ranks in the group"
-        assert send_splits.numel() == self.local_size, "send_splits must have the same number of elements as ranks in the group"
+        assert recv_splits.numel() == self.local_size, (
+            "recv_splits must have the same number of elements as ranks in the group"
+        )
+        assert send_splits.numel() == self.local_size, (
+            "send_splits must have the same number of elements as ranks in the group"
+        )
         assert sendindices.element_size() == 8, "sendindices must be a 64-bit integer"
         assert recvindices.element_size() == 8, "recvindices must be a 64-bit integer"
         assert recv_splits.device.type == "cpu", "recv_splits must be on CPU"
@@ -92,7 +94,9 @@ class FUSCO:
         for i in range(num_ranks):
             sendcounts, recvcounts = send_splits[i].item(), recv_splits[i].item()
             if sendcounts > 0:
-                assert sendoffset + sendcounts <= sendindices.numel(), f"sendindices overflow: {sendoffset + sendcounts} > {sendindices.numel()}"
+                assert sendoffset + sendcounts <= sendindices.numel(), (
+                    f"sendindices overflow: {sendoffset + sendcounts} > {sendindices.numel()}"
+                )
                 ptr = sendindices.data_ptr() + sendoffset * 8
                 self.shared_lib.gatherSend(
                     buffer_type(input.data_ptr()),
@@ -106,7 +110,9 @@ class FUSCO:
                 )
                 sendoffset += sendcounts
             if recvcounts > 0:
-                assert recvoffset + recvcounts <= recvindices.numel(), f"recvindices overflow: {recvoffset + recvcounts} > {recvindices.numel()}"
+                assert recvoffset + recvcounts <= recvindices.numel(), (
+                    f"recvindices overflow: {recvoffset + recvcounts} > {recvindices.numel()}"
+                )
                 ptr = recvindices.data_ptr() + recvoffset * 8
                 self.shared_lib.scatterRecv(
                     buffer_type(output.data_ptr()),
@@ -120,4 +126,3 @@ class FUSCO:
                 )
                 recvoffset += recvcounts
         self.shared_lib.ncclGroupEnd()
-        

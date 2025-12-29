@@ -1,9 +1,8 @@
 import ctypes
 import logging
-import os
 import platform
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import torch
 from torch.distributed import ReduceOp
@@ -14,13 +13,16 @@ ncclResult_t = ctypes.c_int
 ncclComm_t = ctypes.c_void_p
 ncclWindow_t = ctypes.c_void_p
 
+
 class ncclUniqueId(ctypes.Structure):
     _fields_ = [("internal", ctypes.c_byte * 128)]
+
 
 cudaStream_t = ctypes.c_void_p
 buffer_type = ctypes.c_void_p
 
 ncclDataType_t = ctypes.c_int
+
 
 class ncclDataTypeEnum:
     ncclInt8 = 0
@@ -60,7 +62,9 @@ class ncclDataTypeEnum:
             return cls.ncclBfloat16
         raise ValueError(f"Unsupported dtype: {dtype}")
 
+
 ncclRedOp_t = ctypes.c_int
+
 
 class ncclRedOpTypeEnum:
     ncclSum = 0
@@ -89,7 +93,7 @@ class ncclRedOpTypeEnum:
 class Function:
     name: str
     restype: Any
-    argtypes: List[Any]
+    argtypes: list[Any]
 
 
 class SharedLib:
@@ -133,11 +137,11 @@ class SharedLib:
         ),
     ]
 
-    path_to_library_cache: Dict[str, Any] = {}
+    path_to_library_cache: dict[str, Any] = {}
 
     # class attribute to store the mapping from library path
     #  to the corresponding dictionary
-    path_to_dict_mapping: Dict[str, Dict[str, Any]] = {}
+    path_to_dict_mapping: dict[str, dict[str, Any]] = {}
 
     def __init__(self, so_file: Optional[str] = None):
         try:
@@ -154,7 +158,7 @@ class SharedLib:
             raise e
 
         if so_file not in SharedLib.path_to_dict_mapping:
-            _funcs: Dict[str, Any] = {}
+            _funcs: dict[str, Any] = {}
             exported_functions = SharedLib.exported_functions
             for func in exported_functions:
                 f = getattr(self.lib, func.name)
@@ -177,14 +181,10 @@ class SharedLib:
         self.NCCL_CHECK(self._funcs["ncclGetUniqueId"](ctypes.byref(unique_id)))
         return unique_id
 
-    def ncclCommInitRank(
-        self, world_size: int, unique_id: ncclUniqueId, rank: int
-    ) -> ncclComm_t:
+    def ncclCommInitRank(self, world_size: int, unique_id: ncclUniqueId, rank: int) -> ncclComm_t:
         comm = ncclComm_t()
         self.NCCL_CHECK(
-            self._funcs["ncclCommInitRank"](
-                ctypes.byref(comm), world_size, unique_id, rank
-            )
+            self._funcs["ncclCommInitRank"](ctypes.byref(comm), world_size, unique_id, rank)
         )
         return comm
 
@@ -200,7 +200,9 @@ class SharedLib:
         bytesPerSegment: int,
     ) -> None:
         self.NCCL_CHECK(
-            self._funcs["gatherSend"](sendbuff, count, datatype, dest, comm, stream, segmentIndices, bytesPerSegment)
+            self._funcs["gatherSend"](
+                sendbuff, count, datatype, dest, comm, stream, segmentIndices, bytesPerSegment
+            )
         )
 
     def scatterRecv(
@@ -215,7 +217,9 @@ class SharedLib:
         bytesPerSegment: int,
     ) -> None:
         self.NCCL_CHECK(
-            self._funcs["scatterRecv"](recvbuff, count, datatype, src, comm, stream, segmentIndices, bytesPerSegment)
+            self._funcs["scatterRecv"](
+                recvbuff, count, datatype, src, comm, stream, segmentIndices, bytesPerSegment
+            )
         )
 
     def ncclGroupStart(self) -> None:
