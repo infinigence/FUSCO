@@ -50,30 +50,30 @@ We benchmark FUSCO on 64 GPUs (~480 GB/s NVLink) across 8 servers, with 10 CX7
 
 Using routing results of inference of DeepSeek-V3:
 
-| Length (tokens per GPU) |  FUSCO   |   NCCL   |  DeepEP  |
+| Length (tokens per GPU) |   NCCL   |  DeepEP  |  FUSCO   |
 | :---------------------: | :------: | :------: | :------: |
-|          4096           | 27.2 ms  | 44.4 ms  | 30.7 ms  |
-|          8192           | 50.1 ms  | 80.2 ms  | 58.4 ms  |
-|          16384          | 86.8 ms  | 143.6 ms | 116.1 ms |
-|          32768          | 164.4 ms | 266.4 ms | 219.6 ms |
+|          4096           | 44.4 ms  | 30.7 ms  | 27.2 ms  |
+|          8192           | 80.2 ms  | 58.4 ms  | 50.1 ms  |
+|          16384          | 143.6 ms | 116.1 ms | 86.8 ms  |
+|          32768          | 266.4 ms | 219.6 ms | 164.4 ms |
 
 Per-token routing confined to a single node:
 
-| Length (tokens per GPU) |  FUSCO  |   NCCL   |  DeepEP  |
-| :---------------------: | :-----: | :------: | :------: |
-|          4096           | 12.6 ms | 44.0 ms  | 24.7 ms  |
-|          8192           | 22.3 ms | 81.4 ms  | 43.8 ms  |
-|          16384          | 41.0 ms | 150.1 ms | 81.8 ms  |
-|          32768          | 71.5 ms | 274.8 ms | 144.2 ms |
+| Length (tokens per GPU) |   NCCL   |  DeepEP  |  FUSCO  |
+| :---------------------: | :------: | :------: | :-----: |
+|          4096           | 44.0 ms  | 24.7 ms  | 12.6 ms |
+|          8192           | 81.4 ms  | 43.8 ms  | 22.3 ms |
+|          16384          | 150.1 ms | 81.8 ms  | 41.0 ms |
+|          32768          | 274.8 ms | 144.2 ms | 71.5 ms |
 
 Load imbalance:
 
-| Length (tokens per GPU) |  FUSCO   |   NCCL   |  DeepEP  |
+| Length (tokens per GPU) |   NCCL   |  DeepEP  |  FUSCO   |
 | :---------------------: | :------: | :------: | :------: |
-|          4096           | 43.3 ms  | 86.2 ms  | 56.0 ms  |
-|          8192           | 78.9 ms  | 167.5 ms | 108.5 ms |
-|          16384          | 151.3 ms | 339.3 ms | 216.2 ms |
-|          32768          | 305.0 ms | 656.2 ms | 420.9 ms |
+|          4096           | 86.2 ms  | 56.0 ms  | 43.3 ms  |
+|          8192           | 167.5 ms | 108.5 ms | 78.9 ms  |
+|          16384          | 339.3 ms | 216.2 ms | 151.3 ms |
+|          32768          | 656.2 ms | 420.9 ms | 305.0 ms |
 
 
 
