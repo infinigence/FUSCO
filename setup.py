@@ -96,6 +96,10 @@ def get_nvcc_flags() -> list[str]:
 
     print(f"Detected CUDA version: {major}.{minor}")
     print(f"Using nvcc flags: {' '.join(flags)}")
+    print(
+        "Tip: Defining the NVCC_FLAGS environment variable can help reduce compile time.\n"
+        "Example:\nexport NVCC_FLAGS='-gencode=arch=compute_90,code=sm_90'"
+    )
 
     return flags
 

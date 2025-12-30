@@ -24,7 +24,7 @@ You can install the Python package using `uv` (a small index generation kernel w
 pip install uv
 uv venv
 source .venv/bin/activate
-uv pip install .
+uv pip install . -v
 ```
 
 Current repository only contains the Python package and a small kernel for index generation, and does not include the shared library's source as we are still working on organizing it.
