@@ -5,3 +5,5 @@ build/
 .vscode/
 *.egg-info/
 uv.lock
+dist/
+lib/

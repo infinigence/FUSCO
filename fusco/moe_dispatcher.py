@@ -1,5 +1,6 @@
-import idxtools
 import torch
+
+import idxtools
 
 from .fusco import FUSCO
 
