@@ -1,26 +1,48 @@
 # FUSCO
+
 High-performance distributed data shuffling (all-to-all) library for MoE training and inference
 
 ## Quick Start
 
-### Requirements
+### Hardware Requirements
 
-- PyTorch
+- NVIDIA GPUs with CUDA 11.8+ (e.g., A100, H100)
+- High-speed interconnects (e.g., NVLink, InfiniBand with RoCE)
+
+### Software Requirements
+
+- Python 3.10+
+- CUDA 11.8+
+- Ubuntu 20.04+ or compatible Linux distribution (GLIBC 2.27+)
 
 ### Installation
 
-```bash
+FUSCO consists of a Python package and a precompiled shared library `libfusco.so`.
+You can install the Python package using `uv` (a small index generation kernel will also be compiled during installation):
 
+```bash
+pip install uv
+uv venv
+source .venv/bin/activate
+uv pip install .
 ```
 
-### `Example
+Current repository only contains the Python package and a small kernel for index generation, and does not include the shared library's source as we are still working on organizing it.
+
+You can download the precompiled `libfusco.so` from the releases page: https://github.com/infinigence/FUSCO/releases.
+After downloading, place `libfusco.so` in the `lib` directory at the root of this repository.
+
+```bash
+mkdir -p lib
+curl -L -o lib/libfusco.so https://ghfast.top/https://github.com/infinigence/FUSCO/releases/download/v0.1/libfusco.so
+```
+
+### Test Example
 
 ```bash
 python tests/test_intranode.py
 python tests/test_internode.py
 ```
-
-
 
 ## Performance
 

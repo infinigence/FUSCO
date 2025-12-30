@@ -77,11 +77,7 @@ def get_nvcc_flags() -> list[str]:
         )
     elif (major == 11 and minor >= 8) or (major == 12 and minor < 8):
         gencode_flags += (
-            cuda8_gencodes
-            + cuda9_gencodes
-            + cuda11_gencodes
-            + cuda12_gencodes
-            + cuda12_ptx
+            cuda8_gencodes + cuda9_gencodes + cuda11_gencodes + cuda12_gencodes + cuda12_ptx
         )
     elif major >= 11:
         gencode_flags += cuda8_gencodes + cuda9_gencodes + cuda11_gencodes + cuda11_ptx
@@ -108,7 +104,6 @@ setup(
     # Install the Python package `fusco` from the project root
     packages=find_packages(where="."),
     package_dir={"": "."},
-
     ext_modules=[
         CUDAExtension(
             name="idxtools",  # importable as `import idxtools`
