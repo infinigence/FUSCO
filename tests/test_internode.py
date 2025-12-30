@@ -2,9 +2,8 @@ import argparse
 import os
 
 import torch
-from utils import bench, init_dist
-
 from fusco import FUSCO, Fusco2DMoEDispatcher
+from utils import bench, init_dist
 
 global_fusco = None
 intra_fusco = None

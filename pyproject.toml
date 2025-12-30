@@ -2,12 +2,9 @@
 name = "FUSCO"
 version = "0.1.0"
 readme = {file = "README.md", content-type = "text/markdown"}
-requires-python = ">=3.10"
-keywords = [
-    "reinforcement-learning",
-    "embodied-intelligence",
-    "large-language-models",
-]
+requires-python = "==3.12"
+license = { file = "LICENSE" }
+description = "FUSCO is a high-performance MoE communication library"
 classifiers = [
     #   2 - Pre-Alpha
     #   3 - Alpha
@@ -21,16 +18,19 @@ classifiers = [
 ]
 
 dependencies = [
-    # Core System
     "torch",
 ]
+
+[project.urls]
+"Homepage" = "https://github.com/infinigence/FUSCO"
+"Bug Tracker" = "https://github.com/infinigence/FUSCO/issues"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src/python"]
 include = ["fusco"]
 
 [tool.ruff]

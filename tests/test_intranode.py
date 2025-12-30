@@ -2,9 +2,8 @@ import argparse
 import os
 
 import torch
-from utils import bench, init_dist
-
 from fusco import FUSCO, FuscoMoEDispatcher
+from utils import bench, init_dist
 
 fusco = None
 FUSCO_LIB_NAME = "libfusco.so"
