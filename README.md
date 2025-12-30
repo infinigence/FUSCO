@@ -1,2 +1,69 @@
 # FUSCO
 High-performance distributed data shuffling (all-to-all) library for MoE training and inference
+
+## Quick Start
+
+### Requirements
+
+- PyTorch
+
+### Installation
+
+```bash
+
+```
+
+### `Example
+
+```bash
+python tests/test_intranode.py
+python tests/test_internode.py
+```
+
+
+
+## Performance
+
+We benchmark FUSCO on 64 GPUs (~480 GB/s NVLink) across 8 servers, with 10 CX7 400 Gb/s RoCE NICs per server (~50 GB/s each). We use the DeepSeek-V3 MoE setup (7168 hidden, top-8 experts) for Dispatch and Combine under different routing scenarios.
+
+Using routing results of inference of DeepSeek-V3:
+
+| Length (tokens per GPU) |  FUSCO   |   NCCL   |  DeepEP  |
+| :---------------------: | :------: | :------: | :------: |
+|          4096           | 27.2 ms  | 44.4 ms  | 30.7 ms  |
+|          8192           | 50.1 ms  | 80.2 ms  | 58.4 ms  |
+|          16384          | 86.8 ms  | 143.6 ms | 116.1 ms |
+|          32768          | 164.4 ms | 266.4 ms | 219.6 ms |
+
+Per-token routing confined to a single node:
+
+| Length (tokens per GPU) |  FUSCO  |   NCCL   |  DeepEP  |
+| :---------------------: | :-----: | :------: | :------: |
+|          4096           | 12.6 ms | 44.0 ms  | 24.7 ms  |
+|          8192           | 22.3 ms | 81.4 ms  | 43.8 ms  |
+|          16384          | 41.0 ms | 150.1 ms | 81.8 ms  |
+|          32768          | 71.5 ms | 274.8 ms | 144.2 ms |
+
+Load imbalance:
+
+| Length (tokens per GPU) |  FUSCO   |   NCCL   |  DeepEP  |
+| :---------------------: | :------: | :------: | :------: |
+|          4096           | 43.3 ms  | 86.2 ms  | 56.0 ms  |
+|          8192           | 78.9 ms  | 167.5 ms | 108.5 ms |
+|          16384          | 151.3 ms | 339.3 ms | 216.2 ms |
+|          32768          | 305.0 ms | 656.2 ms | 420.9 ms |
+
+
+
+## Citation
+
+If you find FUSCO helpful, please cite the paper:
+
+```bibtex
+@article{zhu2025fusco,
+	title={FUSCO: High-Performance Distributed Data Shuffling via Transformation-Communication Fusion}, 
+	author={Zhu, Zhuoran and Zhu, Chunyang and Lin, Hao and Fu, Xu and Zhou, Yiming and Zhang, Quanlu and Li, Zhenhua and Qian, Feng and Yu, Chao and Li, Boxun and Dai, Guohao and Wang, Yu},
+	journal={arXiv preprint arXiv:2512.22036},
+	year={2025},
+}
+```
