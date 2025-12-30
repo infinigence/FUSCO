@@ -2,7 +2,7 @@
 name = "FUSCO"
 version = "0.1.0"
 readme = {file = "README.md", content-type = "text/markdown"}
-requires-python = "==3.12"
+requires-python = "==3.12.1"
 license = { file = "LICENSE" }
 description = "FUSCO is a high-performance MoE communication library"
 classifiers = [
