@@ -82,8 +82,14 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
 
 
 if __name__ == "__main__":
+    assert torch.cuda.is_available(), "CUDA is not available"
+    available_gpus = torch.cuda.device_count()
+    assert available_gpus > 0, "No CUDA-capable devices detected"
+
     parser = argparse.ArgumentParser(description="Test EP")
-    parser.add_argument("--num-processes", type=int, default=8, help="Number of processes to spawn")
+    parser.add_argument(
+        "--num-processes", type=int, default=available_gpus, help="Number of processes to spawn"
+    )
     parser.add_argument("--num-tokens", type=int, default=16384, help="Number of tokens")
     parser.add_argument("--hidden", type=int, default=7168, help="Hidden dimension size")
     parser.add_argument("--num-topk", type=int, default=8, help="Number of top-k experts")
