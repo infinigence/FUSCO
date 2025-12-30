@@ -48,6 +48,8 @@ python tests/test_internode.py
 
 We benchmark FUSCO on 64 GPUs (~480 GB/s NVLink) across 8 servers, with 10 CX7 400 Gb/s RoCE NICs per server (~50 GB/s each). We use the DeepSeek-V3 MoE setup (7168 hidden, top-8 experts) for Dispatch and Combine under different routing scenarios.
 
+**The latency is measured by the total time of pre-MoE and post-MoE data permutation and the dispatch/combine communication.**
+
 Using routing results of inference of DeepSeek-V3:
 
 | Length (tokens per GPU) |   NCCL   |  DeepEP  |  FUSCO   |
