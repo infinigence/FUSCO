@@ -4,7 +4,7 @@ import os
 import torch
 from utils import bench, init_dist
 
-from fusco import FUSCO, Fusco2DMoEDispatcher
+from fusco import FUSCO, Fusco2DMoEDispatcher, FuscoMoEDispatcher
 
 global_fusco = None
 intra_fusco = None
@@ -44,15 +44,21 @@ def test_main(
     probs, topk_idx = torch.topk(scores, num_topk, dim=-1, largest=True, sorted=False)
     topk_idx = topk_idx.to(torch.int64)
 
-    dispatcher = Fusco2DMoEDispatcher(
-        num_local_experts,
-        local_expert_indices,
-        num_ranks,
-        world_group,
-        global_fusco,
-        intra_fusco,
-        num_local_ranks,
-    )
+    num_nodes = num_ranks // num_local_ranks
+    if num_topk > 1 and num_nodes > 1:
+        dispatcher = Fusco2DMoEDispatcher(
+            num_local_experts,
+            local_expert_indices,
+            num_ranks,
+            world_group,
+            global_fusco,
+            intra_fusco,
+            num_local_ranks,
+        )
+    else:
+        dispatcher = FuscoMoEDispatcher(
+            num_local_experts, local_expert_indices, num_ranks, world_group, global_fusco
+        )
 
     dispatched_inputs, _ = dispatcher.dispatch(hidden_states, probs, topk_idx)
 
@@ -72,13 +78,8 @@ def test_main(
         )
 
 
-def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
-    global_rank, num_ranks, group = init_dist(local_rank, num_local_ranks)
+def init_fusco(num_ranks, num_local_ranks, args: argparse.Namespace):
     global global_fusco, intra_fusco
-    group_ranks = [
-        list(range(start, start + num_local_ranks))
-        for start in range(0, num_ranks, num_local_ranks)
-    ]
 
     library_path = os.path.realpath(os.path.join(args.library_path, FUSCO_LIB_NAME))
     if not os.path.exists(library_path):
@@ -88,7 +89,23 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
         group_ranks=[list(range(num_ranks))],
         library_path=library_path,
     )
-    intra_fusco = FUSCO(group_ranks=group_ranks, library_path=library_path)
+
+    num_nodes = num_ranks // num_local_ranks
+    if num_nodes > 1:
+        intra_group_ranks = [
+            list(range(start, start + num_local_ranks))
+            for start in range(0, num_ranks, num_local_ranks)
+        ]
+        intra_fusco = FUSCO(group_ranks=intra_group_ranks, library_path=library_path)
+
+
+def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
+    global_rank, num_ranks, group = init_dist(local_rank, num_local_ranks)
+    assert num_ranks > 1, "at least 2 ranks are required"
+    assert num_ranks % num_local_ranks == 0, "assume each node has the same number of GPU ranks"
+
+    init_fusco(num_ranks, num_local_ranks, args)
+
     torch.manual_seed(global_rank)
 
     test_main(args, local_rank, num_ranks, num_local_ranks, global_rank, group)
