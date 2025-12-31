@@ -6,8 +6,10 @@ High-performance distributed data shuffling (all-to-all) library for MoE trainin
 
 ### Hardware Requirements
 
+FUSCO builds on NCCL, leveraging its network abstraction layer to support diverse cluster networks.
+
 - NVIDIA GPUs with CUDA 11.8+ (e.g., A100, H100)
-- High-speed interconnects (e.g., NVLink, InfiniBand with RoCE)
+- High-speed interconnects (e.g., NVLink, PCIe, InfiniBand/RoCE, TCP/IP)
 
 ### Software Requirements
 
@@ -18,7 +20,14 @@ High-performance distributed data shuffling (all-to-all) library for MoE trainin
 ### Installation
 
 FUSCO consists of a Python package and a precompiled shared library `libfusco.so`.
-You can install the Python package using `uv` (a small index generation kernel will also be compiled during installation):
+
+You can install the package into your current Python environment (a small index generation kernel will also be compiled during installation):
+
+```bash
+python setup.py install
+```
+
+Alternatively, for a clean and isolated environment, you can install the package using `uv`: 
 
 ```bash
 pip install uv
@@ -40,13 +49,15 @@ curl -L -o lib/libfusco.so https://ghfast.top/https://github.com/infinigence/FUS
 ### Test Example
 
 ```bash
-python tests/test_intranode.py
-python tests/test_internode.py
+python tests/test_fusco.py
+
+# This script runs DeepEP/NCCL. Please ensure they are installed and properly set up in your environment.
+python tests/test_comparison.py
 ```
 
 ## Performance
 
-We benchmark FUSCO on 64 GPUs (~480 GB/s NVLink) across 8 servers, with 10 CX7 400 Gb/s RoCE NICs per server (~50 GB/s each). We use the DeepSeek-V3 MoE setup (7168 hidden, top-8 experts) for Dispatch and Combine under different routing scenarios.
+We benchmark FUSCO on 64 H100 GPUs (~480 GB/s NVLink) across 8 servers, each with 10×400 Gb/s RoCE NICs (~50 GB/s each), using PyTorch 2.7.0. Dispatch and combine are tested on the DeepSeek-V3 MoE setup (7168 hidden, top-8 experts) under different routing scenarios.
 
 **The latency is measured by the total time of pre-MoE and post-MoE data permutation and the dispatch/combine communication.**
 
