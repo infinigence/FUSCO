@@ -4,7 +4,7 @@ import os
 import torch
 from utils import bench, init_dist
 
-from fusco import FUSCO, Fusco2DMoEDispatcher, FuscoMoEDispatcher
+from fusco import FUSCO, FuscoMoEDispatcher
 
 global_fusco = None
 intra_fusco = None
@@ -45,20 +45,17 @@ def test_main(
     topk_idx = topk_idx.to(torch.int64)
 
     num_nodes = num_ranks // num_local_ranks
-    if num_topk > 1 and num_nodes > 1:
-        dispatcher = Fusco2DMoEDispatcher(
-            num_local_experts,
-            local_expert_indices,
-            num_ranks,
-            world_group,
-            global_fusco,
-            intra_fusco,
-            num_local_ranks,
-        )
-    else:
-        dispatcher = FuscoMoEDispatcher(
-            num_local_experts, local_expert_indices, num_ranks, world_group, global_fusco
-        )
+    is_2dmode = num_topk > 1 and num_nodes > 1
+    dispatcher = FuscoMoEDispatcher(
+        num_local_experts,
+        local_expert_indices,
+        num_ranks,
+        world_group,
+        is_2dmode,
+        global_fusco,
+        intra_fusco,
+        num_local_ranks,
+    )
 
     dispatched_inputs, _ = dispatcher.dispatch(hidden_states, probs, topk_idx)
 

@@ -2,7 +2,7 @@ import torch
 import torch.distributed as dist
 
 from .shared_lib import (
-    SharedLib,
+    FUSCOLibrary,
     buffer_type,
     cudaStream_t,
     ncclComm_t,
@@ -14,8 +14,10 @@ from .shared_lib import (
 class FUSCO:
     def __init__(
         self,
-        group_ranks: list[list[int]],
-        library_path: str,
+        group_ranks: list[list[int]] | None = None,
+        nccl_ep_group: torch.distributed.ProcessGroup = None,
+        library_path: str | None = None,
+        shared_lib: FUSCOLibrary = None,
     ):
         assert dist.is_initialized()
         global_rank = dist.get_rank()
@@ -28,11 +30,13 @@ class FUSCO:
         self.local_rank = dist.get_rank(self.cpu_group)
         self.local_size = dist.get_world_size(self.cpu_group)
 
-        try:
-            self.shared_lib = SharedLib(library_path)
-        except Exception:
-            assert False, "Failed to load Shared library."
-
+        if shared_lib is not None:
+            self.shared_lib = shared_lib
+        else:
+            try:
+                self.shared_lib = FUSCOLibrary(library_path)
+            except Exception:
+                assert False, "Failed to load Shared library."
         if self.local_rank == 0:
             self.unique_id = self.shared_lib.ncclGetUniqueId()
         else:

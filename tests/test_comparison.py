@@ -6,7 +6,7 @@ from deepep_dispatcher import DeepEPMoEDispatcher
 from nccl_dispatcher import NCCLMoEDispatcher
 from utils import bench, init_dist
 
-from fusco import FUSCO, Fusco2DMoEDispatcher, FuscoMoEDispatcher
+from fusco import FUSCO, FuscoMoEDispatcher
 
 global_fusco = None
 intra_fusco = None
@@ -104,20 +104,17 @@ def test_main(
     )
 
     num_nodes = num_ranks // num_local_ranks
-    if num_topk > 1 and num_nodes > 1:
-        fusco_dispatcher = Fusco2DMoEDispatcher(
-            num_local_experts,
-            local_expert_indices,
-            num_ranks,
-            world_group,
-            global_fusco,
-            intra_fusco,
-            num_local_ranks,
-        )
-    else:
-        fusco_dispatcher = FuscoMoEDispatcher(
-            num_local_experts, local_expert_indices, num_ranks, world_group, global_fusco
-        )
+    is_2dmode = num_topk > 1 and num_nodes > 1
+    fusco_dispatcher = FuscoMoEDispatcher(
+        num_local_experts,
+        local_expert_indices,
+        num_ranks,
+        world_group,
+        is_2dmode,
+        global_fusco,
+        intra_fusco,
+        num_local_ranks,
+    )
 
     t_deepep = bench_dispatcher(deepep_dispatcher, hidden_states, probs, topk_idx)
     t_nccl = bench_dispatcher(nccl_dispatcher, hidden_states, probs, topk_idx)

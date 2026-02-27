@@ -1,4 +1,5 @@
 from .fusco import FUSCO
-from .moe_dispatcher import Fusco2DMoEDispatcher, FuscoMoEDispatcher
+from .moe_dispatcher import FuscoMoEDispatcher
+from .shared_lib import FUSCOLibrary
 
-__all__ = ["FUSCO", "FuscoMoEDispatcher", "Fusco2DMoEDispatcher"]
+__all__ = ["FUSCO", "FuscoMoEDispatcher", "FUSCOLibrary"]

@@ -96,7 +96,7 @@ class Function:
     argtypes: list[Any]
 
 
-class SharedLib:
+class FUSCOLibrary:
     exported_functions = [
         Function(
             "gatherSend",
@@ -145,10 +145,10 @@ class SharedLib:
 
     def __init__(self, so_file: Optional[str] = None):
         try:
-            if so_file not in SharedLib.path_to_dict_mapping:
+            if so_file not in FUSCOLibrary.path_to_dict_mapping:
                 lib = ctypes.CDLL(so_file)
-                SharedLib.path_to_library_cache[so_file] = lib
-            self.lib = SharedLib.path_to_library_cache[so_file]
+                FUSCOLibrary.path_to_library_cache[so_file] = lib
+            self.lib = FUSCOLibrary.path_to_library_cache[so_file]
         except Exception as e:
             logger.error(
                 "Failed to load shared library from %s .",
@@ -157,16 +157,16 @@ class SharedLib:
             )
             raise e
 
-        if so_file not in SharedLib.path_to_dict_mapping:
+        if so_file not in FUSCOLibrary.path_to_dict_mapping:
             _funcs: dict[str, Any] = {}
-            exported_functions = SharedLib.exported_functions
+            exported_functions = FUSCOLibrary.exported_functions
             for func in exported_functions:
                 f = getattr(self.lib, func.name)
                 f.restype = func.restype
                 f.argtypes = func.argtypes
                 _funcs[func.name] = f
-            SharedLib.path_to_dict_mapping[so_file] = _funcs
-        self._funcs = SharedLib.path_to_dict_mapping[so_file]
+            FUSCOLibrary.path_to_dict_mapping[so_file] = _funcs
+        self._funcs = FUSCOLibrary.path_to_dict_mapping[so_file]
 
     def ncclGetErrorString(self, result: ncclResult_t) -> str:
         return self._funcs["ncclGetErrorString"](result).decode("utf-8")
@@ -230,7 +230,7 @@ class SharedLib:
 
 
 __all__ = [
-    "SharedLib",
+    "FUSCOLibrary",
     "ncclDataTypeEnum",
     "ncclRedOpTypeEnum",
     "ncclUniqueId",

@@ -1,3 +1,5 @@
+from typing import NamedTuple
+
 import torch
 
 import idxtools
@@ -17,6 +19,207 @@ def gather_along_first_dim(input_, group):
     return output
 
 
+class FuscoInfo(NamedTuple):
+    # cross-node
+    global_fusco: FUSCO
+    sendindices_s1: torch.Tensor
+    recvindices_s1: torch.Tensor
+    backindices_s1: torch.Tensor
+    send_splits_s1: torch.Tensor
+    recv_splits_s1: torch.Tensor
+    send_tokens_s1: int
+    recv_tokens_s1: int
+    seq_len: int
+    # intra-node
+    intra_fusco: FUSCO = None
+    sendindices_s2: torch.Tensor = None
+    recvindices_s2: torch.Tensor = None
+    backindices_s2: torch.Tensor = None
+    send_splits_s2: torch.Tensor = None
+    recv_splits_s2: torch.Tensor = None
+    send_tokens_s2: int = 0
+    recv_tokens_s2: int = 0
+    intragroup_expanded_size: torch.Tensor = None
+    intergroup_expanded_size: torch.Tensor = None
+    probs: torch.Tensor = None
+
+
+def dispatch_raw(
+    hidden_states: torch.Tensor,
+    info: FuscoInfo,
+    apply_probs: bool,
+):
+    assert hidden_states.dim() == 2, "hidden_states must be a 2D tensor"
+    hidden_dim = hidden_states.shape[1]
+    curr_device = hidden_states.device
+    curr_dtype = hidden_states.dtype
+    curr_stream = torch.cuda.current_stream()
+
+    is_2dmode = info.intra_fusco is not None
+
+    s1_out = hidden_states.new_empty(
+        (info.recv_tokens_s1, hidden_dim),
+        dtype=hidden_states.dtype,
+        device=hidden_states.device,
+    )
+
+    if not is_2dmode:
+        if apply_probs:
+            hidden_states = hidden_states * info.probs.unsqueeze(-1)
+            sendindices_used = info.backindices_s1
+        else:
+            sendindices_used = info.sendindices_s1
+
+        info.global_fusco.all_to_all(
+            s1_out,
+            hidden_states,
+            recvindices=info.recvindices_s1,
+            sendindices=sendindices_used,
+            recv_splits=info.recv_splits_s1,
+            send_splits=info.send_splits_s1,
+            stream=curr_stream,
+        )
+        return s1_out
+    else:
+        s2_out = hidden_states.new_empty(
+            (info.recv_tokens_s2, hidden_dim),
+            dtype=curr_dtype,
+            device=curr_device,
+        )
+
+        info.global_fusco.all_to_all(
+            s1_out,
+            hidden_states,
+            recvindices=info.recvindices_s1,
+            sendindices=info.sendindices_s1,
+            recv_splits=info.recv_splits_s1,
+            send_splits=info.send_splits_s1,
+            stream=curr_stream,
+        )
+
+        if apply_probs:
+            s1_out = s1_out.repeat_interleave(info.intragroup_expanded_size, dim=0)
+            s1_out = s1_out * info.probs.unsqueeze(-1)
+            sendindices_used = info.backindices_s2
+        else:
+            sendindices_used = info.sendindices_s2
+
+        info.intra_fusco.all_to_all(
+            s2_out,
+            s1_out,
+            recvindices=info.recvindices_s2,
+            sendindices=sendindices_used,
+            recv_splits=info.recv_splits_s2,
+            send_splits=info.send_splits_s2,
+            stream=curr_stream,
+        )
+
+        return s2_out
+
+
+def combine_raw(hidden_states: torch.Tensor, info: FuscoInfo, apply_probs: bool):
+    assert hidden_states.dim() == 2, "hidden_states must be a 2D tensor"
+    hidden_dim = hidden_states.shape[1]
+    curr_device = hidden_states.device
+    curr_dtype = hidden_states.dtype
+    curr_stream = torch.cuda.current_stream()
+
+    is_2dmode = info.intra_fusco is not None
+
+    s1_out = hidden_states.new_empty(
+        (info.send_tokens_s1, hidden_dim),
+        dtype=curr_dtype,
+        device=curr_device,
+    )
+
+    if not is_2dmode:
+        info.global_fusco.all_to_all(
+            s1_out,
+            hidden_states,
+            recvindices=info.backindices_s1,
+            sendindices=info.recvindices_s1,
+            recv_splits=info.send_splits_s1,
+            send_splits=info.recv_splits_s1,
+            stream=curr_stream,
+        )
+
+        s1_out = s1_out.reshape((info.seq_len, -1, hidden_dim))
+        if apply_probs:
+            s1_out = s1_out * info.probs.unsqueeze(-1)
+        s1_out = s1_out.sum(dim=1)
+
+        return s1_out
+    else:
+        s2_out = hidden_states.new_empty(
+            (info.send_tokens_s2, hidden_dim),
+            dtype=curr_dtype,
+            device=curr_device,
+        )
+
+        info.intra_fusco.all_to_all(
+            s2_out,
+            hidden_states,
+            recvindices=info.backindices_s2,
+            sendindices=info.recvindices_s2,
+            recv_splits=info.send_splits_s2,
+            send_splits=info.recv_splits_s2,
+            stream=curr_stream,
+        )
+
+        if info.send_tokens_s2 > 0:
+            if apply_probs:
+                s2_out = s2_out * info.probs.unsqueeze(-1)
+            s2_out = torch.segment_reduce(
+                s2_out, lengths=info.intragroup_expanded_size, reduce="sum"
+            )
+
+        info.global_fusco.all_to_all(
+            s1_out,
+            s2_out,
+            recvindices=info.backindices_s1,
+            sendindices=info.recvindices_s1,
+            recv_splits=info.send_splits_s1,
+            send_splits=info.recv_splits_s1,
+            stream=torch.cuda.current_stream(),
+        )
+
+        if info.send_tokens_s1 != info.intergroup_expanded_size.numel():
+            s1_out = torch.segment_reduce(
+                s1_out, lengths=info.intergroup_expanded_size, reduce="sum"
+            )
+
+        return s1_out
+
+
+class FuscoDispatch(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        hidden_states: torch.Tensor,
+        info: FuscoInfo,
+        apply_probs: bool,
+    ):
+        ctx.info = info
+        ctx.apply_probs = apply_probs
+        return dispatch_raw(hidden_states, info, False)
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        return combine_raw(grad_output, ctx.info, False), None, None
+
+
+class FuscoCombine(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, hidden_states: torch.Tensor, info: FuscoInfo, apply_probs):
+        ctx.info = info
+        ctx.apply_probs = apply_probs
+        return combine_raw(hidden_states, info, apply_probs)
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        return dispatch_raw(grad_output, ctx.info, ctx.apply_probs), None, None
+
+
 class FuscoMoEDispatcher:
     def __init__(
         self,
@@ -24,7 +227,11 @@ class FuscoMoEDispatcher:
         local_expert_indices: list[int],
         ep_size: int,
         ep_group: torch.distributed.ProcessGroup,
-        fusco: FUSCO,
+        is_2dmode: bool,
+        global_fusco: FUSCO = None,
+        intra_fusco: FUSCO = None,
+        num_local_ranks: int = 8,
+        apply_probs: bool = True,
     ):
         self.num_local_experts = num_local_experts
         self.num_experts = ep_size * num_local_experts
@@ -32,10 +239,14 @@ class FuscoMoEDispatcher:
         self.local_expert_indices = local_expert_indices
         self.ep_size = ep_size
         self.ep_group = ep_group
-        self.fusco = fusco
-        self.probs = None
+        self.global_fusco = global_fusco
+        self.intra_fusco = intra_fusco
+        self.num_local_ranks = num_local_ranks
+        self.apply_probs = apply_probs
+        self.is_2dmode = is_2dmode
 
-    def preprocess(self, indices: torch.Tensor) -> torch.Tensor:
+    def preprocess_1d(self, indices: torch.Tensor, probs: torch.Tensor) -> torch.Tensor:
+        seqlen, topk = indices.shape
         num_local_tokens_per_expert = torch.bincount(indices.view(-1), minlength=self.num_experts)
 
         num_local_tokens_per_rank = num_local_tokens_per_expert.view(
@@ -45,9 +256,9 @@ class FuscoMoEDispatcher:
         topk = indices.size(1)
         flatten_indices = indices.view(-1)
 
-        self.sendindices_unique = torch.argsort(flatten_indices, stable=True).contiguous()
-        self.sendindices_with_duplicates = (self.sendindices_unique // topk).contiguous()
-        self.send_splits = num_local_tokens_per_rank.to(torch.device("cpu"))
+        sendindices_unique = torch.argsort(flatten_indices, stable=True).contiguous()
+        sendindices_with_duplicates = (sendindices_unique // topk).contiguous()
+        send_splits = num_local_tokens_per_rank.to(torch.device("cpu"))
 
         num_global_tokens_per_expert = gather_along_first_dim(
             num_local_tokens_per_expert, self.ep_group
@@ -61,92 +272,35 @@ class FuscoMoEDispatcher:
 
         num_tokens_per_ep = num_global_tokens_per_local_expert.sum(dim=1)
 
-        self.num_ep_tokens = num_global_tokens_per_local_expert.sum()
+        num_ep_tokens = num_global_tokens_per_local_expert.sum()
 
-        if self.num_ep_tokens > 0:
-            self.recvindices = idxtools.indices_gen(
+        if num_ep_tokens > 0:
+            recvindices = idxtools.indices_gen(
                 num_global_tokens_per_local_expert,
                 num_tokens_per_local_expert,
                 num_tokens_per_ep,
-                self.num_ep_tokens.item(),
+                num_ep_tokens.item(),
             )
         else:
-            self.recvindices = torch.empty(0, dtype=torch.int64, device=torch.cuda.current_device())
-        self.recv_splits = num_tokens_per_ep.to(torch.device("cpu"))
+            recvindices = torch.empty(0, dtype=torch.int64, device=torch.cuda.current_device())
+        recv_splits = num_tokens_per_ep.to(torch.device("cpu"))
+
+        self.info = FuscoInfo(
+            global_fusco=self.global_fusco,
+            sendindices_s1=sendindices_with_duplicates,
+            recvindices_s1=recvindices,
+            backindices_s1=sendindices_unique,
+            send_splits_s1=send_splits,
+            recv_splits_s1=recv_splits,
+            send_tokens_s1=indices.numel(),
+            recv_tokens_s1=num_ep_tokens,
+            seq_len=seqlen,
+            probs=probs,
+        )
 
         return num_tokens_per_local_expert
 
-    def dispatch(
-        self, hidden_states: torch.Tensor, probs: torch.Tensor, indices: torch.Tensor
-    ) -> torch.Tensor:
-        hidden_dim = hidden_states.shape[-1]
-        self.probs = probs
-        self.indices_shape = indices.shape
-
-        tokens_per_expert = self.preprocess(indices)
-
-        tokens_by_expert = hidden_states.new_empty(
-            (self.num_ep_tokens, hidden_dim), dtype=hidden_states.dtype, device=hidden_states.device
-        )
-
-        self.fusco.all_to_all(
-            tokens_by_expert,
-            hidden_states,
-            recvindices=self.recvindices,
-            sendindices=self.sendindices_with_duplicates,
-            recv_splits=self.recv_splits,
-            send_splits=self.send_splits,
-            stream=torch.cuda.current_stream(),
-        )
-
-        return tokens_by_expert, tokens_per_expert
-
-    def combine(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_dim = hidden_states.shape[-1]
-        outputs_unpermuted = hidden_states.new_empty(
-            (self.indices_shape[0], self.indices_shape[1], hidden_dim),
-            dtype=hidden_states.dtype,
-            device=hidden_states.device,
-        )
-
-        self.fusco.all_to_all(
-            outputs_unpermuted,
-            hidden_states,
-            recvindices=self.sendindices_unique,
-            sendindices=self.recvindices,
-            recv_splits=self.send_splits,
-            send_splits=self.recv_splits,
-            stream=torch.cuda.current_stream(),
-        )
-
-        outputs_unpermuted = outputs_unpermuted * self.probs.unsqueeze(-1)
-        outputs_unpermuted = outputs_unpermuted.sum(dim=1)
-
-        return outputs_unpermuted
-
-
-class Fusco2DMoEDispatcher:
-    def __init__(
-        self,
-        num_local_experts: int,
-        local_expert_indices: list[int],
-        ep_size: int,
-        ep_group: torch.distributed.ProcessGroup,
-        global_fusco: FUSCO,
-        intra_fusco: FUSCO,
-        num_local_ranks: int = 8,
-    ):
-        self.num_local_experts = num_local_experts
-        self.num_experts = ep_size * num_local_experts
-        assert self.num_local_experts > 0, "Expected at least one expert"
-        self.local_expert_indices = local_expert_indices
-        self.ep_size = ep_size
-        self.ep_group = ep_group
-        self.global_fusco = global_fusco
-        self.intra_fusco = intra_fusco
-        self.num_local_ranks = num_local_ranks
-
-    def preprocess(self, indices: torch.Tensor, probs: torch.Tensor) -> torch.Tensor:
+    def preprocess_2d(self, indices: torch.Tensor, probs: torch.Tensor) -> torch.Tensor:
         seqlen, topk = indices.shape
         assert topk > 1, (
             "2D Dispatcher is efficient only when topk > 1, please use FuscoMoEDispatcher instead"
@@ -189,19 +343,19 @@ class Fusco2DMoEDispatcher:
         intergroup_send_mapping = intergroup_mapping[my_node]
 
         # [ep_size]
-        self.send_splits_s1 = intergroup_send_mapping.sum(dim=0).to(torch.device("cpu"))
+        send_splits_s1 = intergroup_send_mapping.sum(dim=0).to(torch.device("cpu"))
         # int
-        self.send_tokens_s1 = self.send_splits_s1.sum()
+        send_tokens_s1 = send_splits_s1.sum()
         # [seqlen]
-        self.intergroup_expanded_size = intergroup_send_mapping.sum(dim=1)
+        intergroup_expanded_size = intergroup_send_mapping.sum(dim=1)
         # [nNodes]
         recv_tokens_per_rank_s1 = intergroup_mapping[:, :, my_rank].sum(dim=1)
         # int
-        self.recv_tokens_s1 = recv_tokens_per_rank_s1.sum()
+        recv_tokens_s1 = recv_tokens_per_rank_s1.sum()
 
-        self.recvindices_s1 = torch.arange(self.recv_tokens_s1, dtype=torch.int64, device=device)
+        recvindices_s1 = torch.arange(recv_tokens_s1, dtype=torch.int64, device=device)
         idx = torch.arange(self.ep_size, dtype=torch.int64, device=device)
-        self.recv_splits_s1 = torch.where(
+        recv_splits_s1 = torch.where(
             idx % ranks_per_node == local_rank, recv_tokens_per_rank_s1[idx // ranks_per_node], 0
         ).to(torch.device("cpu"))
 
@@ -209,11 +363,11 @@ class Fusco2DMoEDispatcher:
         row_mask, col_mask = intergroup_send_mapping.nonzero(as_tuple=True)
         intergroup_send_mapping[row_mask, col_mask] = ranks[col_mask]
         intergroup_send_indices = intergroup_send_mapping[row_mask, col_mask]
-        self.backindices_s1 = torch.argsort(intergroup_send_indices, stable=True)
+        backindices_s1 = torch.argsort(intergroup_send_indices, stable=True)
         pos_mapping_s1 = torch.repeat_interleave(
-            torch.arange(seqlen, device=device), self.intergroup_expanded_size
+            torch.arange(seqlen, device=device), intergroup_expanded_size
         )
-        self.sendindices_s1 = pos_mapping_s1[self.backindices_s1]
+        sendindices_s1 = pos_mapping_s1[backindices_s1]
 
         # ========================= stage 2 =========================
         # [ep_size, seqlen, num_experts]
@@ -232,9 +386,9 @@ class Fusco2DMoEDispatcher:
             intragroup_indices < node_expert_end
         )
         intragroup_expanded_size = intragroup_mask.sum(dim=1)
-        self.intragroup_expanded_size = intragroup_expanded_size[intragroup_expanded_size != 0]
+        intragroup_expanded_size = intragroup_expanded_size[intragroup_expanded_size != 0]
         mask_indices = intragroup_indices[intragroup_mask]
-        self.intragroup_probs = intragroup_probs[intragroup_mask].unsqueeze(-1)
+        intragroup_probs = intragroup_probs[intragroup_mask]
 
         # [8, num_experts]
         group_send_tokens_per_expert_s2 = num_global_tokens_per_expert.reshape(
@@ -245,20 +399,20 @@ class Fusco2DMoEDispatcher:
             local_rank, node_expert_begin:node_expert_end
         ]
         # [8]
-        self.send_splits_s2 = (
+        send_splits_s2 = (
             send_tokens_per_expert_s2.view(ranks_per_node, self.num_local_experts)
             .sum(dim=1)
             .to(torch.device("cpu"))
         )
         # int
-        self.send_tokens_s2 = self.send_splits_s2.sum()
+        send_tokens_s2 = send_splits_s2.sum()
 
-        self.backindices_s2 = torch.argsort(mask_indices, stable=True)
+        backindices_s2 = torch.argsort(mask_indices, stable=True)
         pos_mapping_s2 = torch.repeat_interleave(
-            torch.arange(self.intragroup_expanded_size.numel(), device=device),
-            self.intragroup_expanded_size,
+            torch.arange(intragroup_expanded_size.numel(), device=device),
+            intragroup_expanded_size,
         )
-        self.sendindices_s2 = pos_mapping_s2[self.backindices_s2]
+        sendindices_s2 = pos_mapping_s2[backindices_s2]
 
         # [8, num_local_experts]
         group_recv_tokens_per_expert_s2 = group_send_tokens_per_expert_s2[
@@ -268,21 +422,44 @@ class Fusco2DMoEDispatcher:
         recv_tokens_per_expert_s2 = group_recv_tokens_per_expert_s2.sum(dim=0)
         # [8]
         recv_tokens_per_rank_s2 = group_recv_tokens_per_expert_s2.sum(dim=1)
-        self.recv_splits_s2 = recv_tokens_per_rank_s2.to(torch.device("cpu"))
+        recv_splits_s2 = recv_tokens_per_rank_s2.to(torch.device("cpu"))
         # int
-        self.recv_tokens_s2 = recv_tokens_per_rank_s2.sum()
-        if self.recv_tokens_s2 > 0:
-            self.recvindices_s2 = idxtools.indices_gen(
+        recv_tokens_s2 = recv_tokens_per_rank_s2.sum()
+        if recv_tokens_s2 > 0:
+            recvindices_s2 = idxtools.indices_gen(
                 group_recv_tokens_per_expert_s2,
                 recv_tokens_per_expert_s2,
                 recv_tokens_per_rank_s2,
-                self.recv_tokens_s2.item(),
+                recv_tokens_s2.item(),
             )
         else:
-            self.recvindices_s2 = torch.empty(0, dtype=torch.int64, device=device)
+            recvindices_s2 = torch.empty(0, dtype=torch.int64, device=device)
 
-        assert self.send_tokens_s2 == self.intragroup_probs.numel(), (
-            f"Mismatch: {self.send_tokens_s2} vs. {self.intragroup_probs.numel()}, this may be caused by duplicate experts selected in top-k (i.e., a token selecting the same expert multiple times)."
+        assert send_tokens_s2 == intragroup_probs.numel(), (
+            f"Mismatch: {send_tokens_s2} vs. {intragroup_probs.numel()}, this may be caused by duplicate experts selected in top-k (i.e., a token selecting the same expert multiple times)."
+        )
+
+        self.info = FuscoInfo(
+            global_fusco=self.global_fusco,
+            sendindices_s1=sendindices_s1,
+            recvindices_s1=recvindices_s1,
+            backindices_s1=backindices_s1,
+            send_splits_s1=send_splits_s1,
+            recv_splits_s1=recv_splits_s1,
+            send_tokens_s1=send_tokens_s1,
+            recv_tokens_s1=recv_tokens_s1,
+            seq_len=seqlen,
+            intra_fusco=self.intra_fusco,
+            sendindices_s2=sendindices_s2,
+            recvindices_s2=recvindices_s2,
+            backindices_s2=backindices_s2,
+            send_splits_s2=send_splits_s2,
+            recv_splits_s2=recv_splits_s2,
+            send_tokens_s2=send_tokens_s2,
+            recv_tokens_s2=recv_tokens_s2,
+            intragroup_expanded_size=intragroup_expanded_size,
+            intergroup_expanded_size=intergroup_expanded_size,
+            probs=intragroup_probs,
         )
 
         return recv_tokens_per_expert_s2
@@ -290,90 +467,20 @@ class Fusco2DMoEDispatcher:
     def dispatch(
         self, hidden_states: torch.Tensor, probs: torch.Tensor, indices: torch.Tensor
     ) -> torch.Tensor:
-        if probs.dtype != hidden_states.dtype:
-            probs = probs.to(hidden_states.dtype)
-        tokens_per_expert = self.preprocess(indices, probs)
+        self.hidden_shape = hidden_states.shape
+        assert probs.dim() == 2, "Expected 2D tensor for probs"
+        assert indices.dim() == 2, "Expected 2D tensor for token2expert mask"
+        hidden_states = hidden_states.view(-1, self.hidden_shape[-1])
 
-        hidden_dim = hidden_states.shape[1]
-        buffer = hidden_states.new_empty(
-            (self.recv_tokens_s1, hidden_dim),
-            dtype=hidden_states.dtype,
-            device=hidden_states.device,
-        )
-        tokens_by_expert = hidden_states.new_empty(
-            (self.recv_tokens_s2, hidden_dim),
-            dtype=hidden_states.dtype,
-            device=hidden_states.device,
-        )
+        if self.is_2dmode:
+            tokens_per_expert = self.preprocess_2d(indices, probs)
+        else:
+            tokens_per_expert = self.preprocess_1d(indices, probs)
 
-        # cross-nodes
-        self.global_fusco.all_to_all(
-            buffer,
-            hidden_states,
-            recvindices=self.recvindices_s1,
-            sendindices=self.sendindices_s1,
-            recv_splits=self.recv_splits_s1,
-            send_splits=self.send_splits_s1,
-            stream=torch.cuda.current_stream(),
-        )
-
-        # intra-nodes
-        self.intra_fusco.all_to_all(
-            tokens_by_expert,
-            buffer,
-            recvindices=self.recvindices_s2,
-            sendindices=self.sendindices_s2,
-            recv_splits=self.recv_splits_s2,
-            send_splits=self.send_splits_s2,
-            stream=torch.cuda.current_stream(),
-        )
+        tokens_by_expert = FuscoDispatch.apply(hidden_states, self.info, self.apply_probs)
 
         return tokens_by_expert, tokens_per_expert
 
     def combine(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_dim = hidden_states.shape[-1]
-        outputs_unpermuted = hidden_states.new_empty(
-            size=(self.send_tokens_s1, hidden_dim),
-            dtype=hidden_states.dtype,
-            device=hidden_states.device,
-        )
-
-        outputs_buffer = hidden_states.new_empty(
-            size=(self.send_tokens_s2, hidden_dim),
-            dtype=hidden_states.dtype,
-            device=hidden_states.device,
-        )
-
-        # intra-nodes
-        self.intra_fusco.all_to_all(
-            outputs_buffer,
-            hidden_states,
-            recvindices=self.backindices_s2,
-            sendindices=self.recvindices_s2,
-            recv_splits=self.send_splits_s2,
-            send_splits=self.recv_splits_s2,
-            stream=torch.cuda.current_stream(),
-        )
-
-        if self.send_tokens_s2 > 0:
-            outputs_buffer = outputs_buffer * self.intragroup_probs
-            outputs_buffer = torch.segment_reduce(
-                outputs_buffer, lengths=self.intragroup_expanded_size, reduce="sum"
-            )
-
-        # cross-nodes
-        self.global_fusco.all_to_all(
-            outputs_unpermuted,
-            outputs_buffer,
-            recvindices=self.backindices_s1,
-            sendindices=self.recvindices_s1,
-            recv_splits=self.send_splits_s1,
-            send_splits=self.recv_splits_s1,
-            stream=torch.cuda.current_stream(),
-        )
-
-        if self.send_tokens_s1 != self.intergroup_expanded_size.numel():
-            outputs_unpermuted = torch.segment_reduce(
-                outputs_unpermuted, lengths=self.intergroup_expanded_size, reduce="sum"
-            )
-        return outputs_unpermuted
+        output = FuscoCombine.apply(hidden_states, self.info, self.apply_probs)
+        return output.view(self.hidden_shape)
