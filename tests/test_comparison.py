@@ -145,7 +145,7 @@ def test_main(
     )
 
 
-def init_fusco(num_ranks, num_local_ranks, args: argparse.Namespace):
+def init_fusco(num_ranks, num_local_ranks, world_group, global_rank, args: argparse.Namespace):
     global global_fusco, intra_fusco
 
     library_path = os.path.realpath(os.path.join(args.library_path, FUSCO_LIB_NAME))
@@ -153,7 +153,7 @@ def init_fusco(num_ranks, num_local_ranks, args: argparse.Namespace):
         raise FileNotFoundError(f"Shared library {FUSCO_LIB_NAME} not found in {library_path}")
 
     global_fusco = FUSCO(
-        group_ranks=[list(range(num_ranks))],
+        nccl_ep_group=world_group,
         library_path=library_path,
     )
 
@@ -163,7 +163,17 @@ def init_fusco(num_ranks, num_local_ranks, args: argparse.Namespace):
             list(range(start, start + num_local_ranks))
             for start in range(0, num_ranks, num_local_ranks)
         ]
-        intra_fusco = FUSCO(group_ranks=intra_group_ranks, library_path=library_path)
+        intra_group = None
+        nccl_options = torch.distributed.ProcessGroupNCCL.Options()
+        nccl_options.config.cga_cluster_size = 8
+        nccl_options.config.max_ctas = 32
+        nccl_options.config.min_ctas = 32
+        for ranks in intra_group_ranks:
+            if global_rank in ranks:
+                intra_group = torch.distributed.new_group(
+                    ranks, backend="nccl", pg_options=nccl_options
+                )
+        intra_fusco = FUSCO(nccl_ep_group=intra_group, library_path=library_path)
 
 
 def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
@@ -171,7 +181,7 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
     assert num_ranks > 1, "at least 2 ranks are required"
     assert num_ranks % num_local_ranks == 0, "assume each node has the same number of GPU ranks"
 
-    init_fusco(num_ranks, num_local_ranks, args)
+    init_fusco(num_ranks, num_local_ranks, group, global_rank, args)
 
     torch.manual_seed(global_rank)
 

@@ -14,21 +14,14 @@ from .shared_lib import (
 class FUSCO:
     def __init__(
         self,
-        group_ranks: list[list[int]] | None = None,
         nccl_ep_group: torch.distributed.ProcessGroup = None,
         library_path: str | None = None,
         shared_lib: FUSCOLibrary = None,
     ):
         assert dist.is_initialized()
-        global_rank = dist.get_rank()
+        self.local_rank = dist.get_rank(group=nccl_ep_group)
+        self.local_size = dist.get_world_size(group=nccl_ep_group)
         device = torch.device("cuda", torch.cuda.current_device())
-
-        for ranks in group_ranks:
-            cpu_group = torch.distributed.new_group(ranks, backend="gloo")
-            if global_rank in ranks:
-                self.cpu_group = cpu_group
-        self.local_rank = dist.get_rank(self.cpu_group)
-        self.local_size = dist.get_world_size(self.cpu_group)
 
         if shared_lib is not None:
             self.shared_lib = shared_lib
@@ -42,13 +35,13 @@ class FUSCO:
         else:
             self.unique_id = ncclUniqueId()
 
-        tensor = torch.ByteTensor(list(self.unique_id.internal))
-        ranks = dist.get_process_group_ranks(self.cpu_group)
+        tensor = torch.tensor(list(self.unique_id.internal), dtype=torch.uint8, device=device)
 
-        dist.broadcast(tensor, src=ranks[0], group=self.cpu_group)
-        byte_list = tensor.tolist()
-        for i, byte in enumerate(byte_list):
-            self.unique_id.internal[i] = byte
+        ranks = dist.get_process_group_ranks(nccl_ep_group)
+        dist.broadcast(tensor, src=ranks[0], group=nccl_ep_group)
+
+        self.unique_id.internal[:] = tensor.cpu().numpy().tobytes()
+
         self.device = device
 
         with torch.cuda.device(device):
