@@ -62,7 +62,7 @@ def test_main(
     _ = dispatcher.combine(dispatched_inputs)
 
     t_dispatch = bench(lambda: dispatcher.dispatch(hidden_states, probs, topk_idx))
-    t_combine = bench(lambda: dispatcher.combine(hidden_states))
+    t_combine = bench(lambda: dispatcher.combine(dispatched_inputs))
 
     if local_rank == 0:
         print(
