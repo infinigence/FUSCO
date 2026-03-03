@@ -151,9 +151,7 @@ class FUSCOLibrary:
             self.lib = FUSCOLibrary.path_to_library_cache[so_file]
         except Exception as e:
             logger.error(
-                "Failed to load shared library from %s .",
-                so_file,
-                platform.platform(),
+                f"Failed to load shared library from {so_file} on {platform.platform()}: {e}"
             )
             raise e
 
