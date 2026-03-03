@@ -1,3 +1,5 @@
+import logging
+
 import torch
 import torch.distributed as dist
 
@@ -9,6 +11,8 @@ from .shared_lib import (
     ncclDataTypeEnum,
     ncclUniqueId,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class FUSCO:
@@ -28,8 +32,9 @@ class FUSCO:
         else:
             try:
                 self.shared_lib = FUSCOLibrary(library_path)
-            except Exception:
-                assert False, "Failed to load Shared library."
+            except Exception as e:
+                logger.error(f"Failed to load Shared library: {e}")
+                raise
         if self.local_rank == 0:
             self.unique_id = self.shared_lib.ncclGetUniqueId()
         else:

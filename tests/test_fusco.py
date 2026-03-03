@@ -142,7 +142,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     os.environ["NCCL_NCHANNELS_PER_NET_PEER"] = "32"
 
     num_processes = args.num_processes
